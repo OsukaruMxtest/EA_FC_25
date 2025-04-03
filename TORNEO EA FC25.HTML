@@ -7,7 +7,6 @@
   <style>
     /* Estilos EA FC 25 */
     :root {
-      /* Ajusta los offsets de cada encabezado de forma independiente */
       --header-offset-R1: 12px;
       --header-offset-R2: 5px;
       --header-offset-R3: 10px;
@@ -103,7 +102,6 @@
     #left_R1, #right_R1 {
       min-width: 60px;
     }
-    /* Encabezados de cada columna */
     .round-column h2 {
       font-size: 0.9rem;
       text-align: center;
@@ -284,7 +282,7 @@
     </div>
   </div>
   <div class="signature"></div>
-  <script src="https://apis.google.com/js/api.js"></script>
+
   <script>
     // Estado del torneo
     let tournamentState = {
@@ -300,67 +298,144 @@
 
     // Inicialización
     document.addEventListener('DOMContentLoaded', function() {
-      // Cargar datos desde Google Sheets al iniciar
       cargarDatosDesdeGoogleSheets();
     });
 
     function cargarDatosDesdeGoogleSheets() {
-      gapi.load('client:auth2', initClient);
+      const sheetId = '1p876vtWslZ3sJc8qwgPPHElj4MykJ2ITpqn1tH6IO58';
+      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+      
+      fetch(url)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Error al cargar los datos');
+          }
+          return response.text();
+        })
+        .then(csvData => {
+          try {
+            const datos = parsearCSV(csvData);
+            procesarDatosTorneo(datos);
+          } catch (error) {
+            console.error('Error al procesar datos:', error);
+            alert('Error al procesar los datos. Verifica la consola para más detalles.');
+          }
+        })
+        .catch(error => {
+          console.error('Error al cargar datos:', error);
+          alert('Error al cargar los datos. Por favor verifica la consola.');
+        });
     }
 
-    function initClient() {
-      gapi.client.init({
-        'apiKey': 'AIzaSyBjV8jpGOlHpX_GnQBgrnBkG13w-zwfOMk',
-        'discoveryDocs': ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
-      }).then(function() {
-        return gapi.client.sheets.spreadsheets.values.get({
-          spreadsheetId: '1p876vtWslZ3sJc8qwgPPHElj4MykJ2ITpqn1tH6IO58',
-          range: 'LLAVES!B3:AZ33', // Ajusta el rango según tus necesidades
-        });
-      }).then(function(response) {
-        const datos = response.result.values;
-        console.log(datos); // Verificar datos cargados
-        const matches = {};
+    function parsearCSV(csvText) {
+      const lines = csvText.split('\n');
+      const result = [];
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const row = line.replace(/"/g, '').split('\t');
+        
+        if (row.length > 1 || (row.length === 1 && row[0] !== '')) {
+          result.push(row);
+        }
+      }
+      
+      return result;
+    }
 
-        datos.forEach(fila => {
-          const [ronda, llave, teamSup, bxSupRange, teamInf, bxInfRange] = fila;
-          const matchId = `${ronda}_${llave}`;
+    function procesarDatosTorneo(datos) {
+      if (!datos || !Array.isArray(datos)) {
+        throw new Error('Datos no válidos recibidos');
+      }
 
-          if (!matches[matchId]) {
-            matches[matchId] = {
-              team1: { nombre: teamSup, checkboxes: [] },
-              team2: { nombre: teamInf, checkboxes: [] }
-            };
-          }
+      const matches = {};
+      let currentRound = '';
+      let matchIndex = 0;
 
-          // Convertir rangos de checkboxes en booleanos
-          const checkboxesSup = bxSupRange.split(':').map(valor => valor === 'TRUE');
-          const checkboxesInf = bxInfRange.split(':').map(valor => valor === 'TRUE');
+      for (let i = 0; i < datos.length; i++) {
+        const row = datos[i];
+        if (!row || row.length < 47) continue;
 
-          matches[matchId].team1.checkboxes = checkboxesSup;
-          matches[matchId].team2.checkboxes = checkboxesInf;
-        });
+        // Detectar cambios de ronda
+        if (row[1] && row[1].includes('16vos')) {
+          currentRound = 'R1';
+          matchIndex = 0;
+        } else if (row[6] && row[6].includes('OCTAVOS DE FINAL')) {
+          currentRound = 'R2';
+          matchIndex = 0;
+        } else if (row[11] && row[11].includes('CUARTOS DE FINAL')) {
+          currentRound = 'R3';
+          matchIndex = 0;
+        } else if (row[16] && row[16].includes('SEMIFINAL')) {
+          currentRound = 'R4';
+          matchIndex = 0;
+        } else if (row[17] && row[17].includes('PRIMER LUGAR')) {
+          currentRound = 'R5';
+          matchIndex = 0;
+        }
 
-        // Convertir matches en la estructura esperada
-        tournamentState.equipos = Object.keys(matches).map(key => ({
-          matchId: key,
-          team1: matches[key].team1.nombre,
-          team2: matches[key].team2.nombre
-        }));
+        // Procesar equipos
+        if (row[1] && row[1].startsWith('EQUIPO')) {
+          const side = i < 10 ? 'left' : 'right';
+          const matchId = `${side}_${currentRound}_${matchIndex}`;
+          
+          matches[matchId] = {
+            team1: {
+              nombre: row[1] || 'PENDIENTE',
+              checkboxes: [
+                row[2] === 'TRUE', 
+                row[3] === 'TRUE', 
+                row[4] === 'TRUE'
+              ].filter(val => val !== undefined)
+            },
+            team2: {
+              nombre: (row[46] && row[46].startsWith('EQUIPO')) ? row[46] : 'PENDIENTE',
+              checkboxes: [
+                row[47] === 'TRUE', 
+                row[48] === 'TRUE', 
+                row[49] === 'TRUE'
+              ].filter(val => val !== undefined)
+            }
+          };
+          
+          matchIndex++;
+        }
+      }
 
-        tournamentState.resultados = matches;
-        inicializarBracket();
-      }, function(response) {
-        console.error('Error: ' + response.result.error.message);
-      });
+      // Actualizar el estado del torneo
+      tournamentState.equipos = Object.keys(matches).map(key => ({
+        matchId: key,
+        team1: matches[key].team1.nombre,
+        team2: matches[key].team2.nombre
+      }));
+
+      tournamentState.resultados = matches;
+      console.log('Datos procesados:', tournamentState);
+      
+      inicializarBracket();
     }
 
     function inicializarBracket() {
-      const equiposIzq = shuffleArray(tournamentState.equipos.filter(equipo => equipo.matchId.startsWith('left_')));
-      const equiposDer = shuffleArray(tournamentState.equipos.filter(equipo => equipo.matchId.startsWith('right_')));
+      // Limpiar contenedores existentes
+      document.querySelectorAll('.round-column').forEach(container => {
+        container.innerHTML = '';
+      });
 
-      renderRound('left', 'R1', equiposIzq, 3);
-      renderRound('right', 'R1', equiposDer, 3);
+      // Renderizar todas las rondas
+      renderRound('left', 'R1', tournamentState.equipos.filter(e => e.matchId.startsWith('left_R1')), 3);
+      renderRound('left', 'R2', tournamentState.equipos.filter(e => e.matchId.startsWith('left_R2')), 3);
+      renderRound('left', 'R3', tournamentState.equipos.filter(e => e.matchId.startsWith('left_R3')), 3);
+      renderRound('left', 'R4', tournamentState.equipos.filter(e => e.matchId.startsWith('left_R4')), 3);
+      
+      renderRound('right', 'R1', tournamentState.equipos.filter(e => e.matchId.startsWith('right_R1')), 3);
+      renderRound('right', 'R2', tournamentState.equipos.filter(e => e.matchId.startsWith('right_R2')), 3);
+      renderRound('right', 'R3', tournamentState.equipos.filter(e => e.matchId.startsWith('right_R3')), 3);
+      renderRound('right', 'R4', tournamentState.equipos.filter(e => e.matchId.startsWith('right_R4')), 3);
+      
+      renderRound('center', 'R5', null, 5);
+      renderRound('center', 'R6', null, 5);
 
       document.getElementById('bracketContainer').style.display = 'flex';
 
@@ -374,14 +449,6 @@
         scale: [0.9, 1],
         translateY: [20, 0]
       });
-    }
-
-    function shuffleArray(array) {
-      for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-      }
-      return array;
     }
 
     function renderRound(side, round, data, numCheckboxes) {
@@ -401,25 +468,24 @@
       }
 
       let matches = [];
-      if (round === 'R1' && data) {
-        data.forEach(equipo => {
-          matches.push({
-            team1: equipo.team1,
-            team2: equipo.team2
-          });
-        });
-      } else if (['R5','R6'].includes(round)) {
-        const existingMatches = container.getElementsByClassName('match');
-        if (existingMatches.length === 0) {
-          matches = data ? data : [{ team1: 'PENDIENTE', team2: 'PENDIENTE' }];
-        }
+      if (data && data.length > 0) {
+        matches = data.map(equipo => ({
+          team1: equipo.team1,
+          team2: equipo.team2,
+          matchId: equipo.matchId
+        }));
       } else {
-        const cantidad = round === 'R2' ? 4 : round === 'R3' ? 2 : 1;
+        const cantidad = round === 'R1' ? 8 : round === 'R2' ? 4 : round === 'R3' ? 2 : 1;
         for (let i = 0; i < cantidad; i++) {
-          matches.push({ team1: 'PENDIENTE', team2: 'PENDIENTE' });
+          matches.push({ 
+            team1: 'PENDIENTE', 
+            team2: 'PENDIENTE',
+            matchId: `${side}_${round}_${i}`
+          });
         }
       }
 
+      // Crear encabezado de ronda
       let h2 = container.querySelector('h2');
       if (!h2) {
         h2 = document.createElement('h2');
@@ -450,18 +516,20 @@
         container.prepend(h2);
       }
 
+      // Crear partidos
       matches.forEach((match, idx) => {
-        const existingMatch = container.querySelector(`.match:nth-of-type(${idx + 1})`);
+        const matchId = match.matchId || `${side}_${round}_${idx}`;
+        const existingMatch = container.querySelector(`.match[data-match-id="${matchId}"]`);
+        
         if (!existingMatch) {
           const matchDiv = document.createElement('div');
           matchDiv.className = 'match';
-          const matchId = `${side}_${round}_${idx}`;
           matchDiv.dataset.matchId = matchId;
           matchDiv.style.animationDelay = `${idx * 0.15}s`;
 
           // Ajustes de posición según la ronda
           if (round === 'R1') {
-            matchDiv.style.marginTop = '0px';
+            matchDiv.style.marginTop = `${idx * 0}px`;
           }
           else if (round === 'R2') {
             if (idx === 0) matchDiv.style.marginTop = '-61px';
@@ -490,17 +558,28 @@
             teamDiv.dataset.matchId = matchId;
             teamDiv.dataset.team = teamKey;
 
-            const teamName = match[teamKey] ? match[teamKey] : 'PENDIENTE';
+            const teamName = match[teamKey] || 'PENDIENTE';
             teamDiv.innerHTML = `<span class="team-name">${teamName}</span>`;
 
             const cbContainer = document.createElement('div');
             cbContainer.className = 'checkboxes';
+            
+            // Obtener checkboxes desde el estado del torneo
+            const matchData = tournamentState.resultados[matchId];
+            const teamData = matchData ? matchData[teamKey] : null;
+            
             for (let i = 0; i < numCheckboxes; i++) {
               const cb = document.createElement('input');
               cb.type = 'checkbox';
               cb.dataset.index = i;
-              const checkboxState = tournamentState.resultados[matchId]?.[teamKey]?.checkboxes?.[i] || false;
-              cb.checked = checkboxState;
+              
+              // Establecer estado del checkbox
+              if (teamData && teamData.checkboxes && i < teamData.checkboxes.length) {
+                cb.checked = teamData.checkboxes[i];
+              } else {
+                cb.checked = false;
+              }
+              
               cb.addEventListener('change', function() {
                 handleCheckboxChange(teamDiv, i, this.checked, numCheckboxes);
               });
@@ -518,7 +597,7 @@
           });
 
           if (match.team1 === 'PENDIENTE' && match.team2 === 'PENDIENTE') {
-            matchDiv.style.opacity = '0';
+            matchDiv.style.opacity = '0.5';
             matchDiv.style.pointerEvents = 'none';
           }
 
@@ -681,5 +760,6 @@
       }
     }
   </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
 </body>
 </html>
